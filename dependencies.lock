@@ -1,4 +1,11 @@
 dependencies:
+  bblanchon/arduinojson:
+    component_hash: 4c987ae9048dffa065364e27e18cdae3f3beb1abf2914e2321d288db0ad6b52b
+    dependencies: []
+    source:
+      registry_url: https://components.espressif.com
+      type: service
+    version: 7.4.0
   chmorgan/esp-libhelix-mp3:
     component_hash: cbb76089dc2c5749f7b470e2e70aedc44c9da519e04eb9a67d4c7ec275229e53
     dependencies:
@@ -9,6 +16,32 @@ dependencies:
       registry_url: https://components.espressif.com
       type: service
     version: 1.0.3
+  esp32async/asynctcp:
+    component_hash: 5df235213c57e44651f2db90454061433dc91f69fd388ba365afc85851d9a7ae
+    dependencies:
+    - name: espressif/arduino-esp32
+      registry_url: https://components.espressif.com
+      require: private
+      version: ^3.1.1
+    source:
+      registry_url: https://components.espressif.com
+      type: service
+    version: 3.3.8
+  esp32async/espasyncwebserver:
+    component_hash: 34d08b49366d8f31fc70bccdf8765fcefcf73bcb19fdf1c5dad26f81e36a23df
+    dependencies:
+    - name: bblanchon/arduinojson
+      registry_url: https://components.espressif.com
+      require: private
+      version: ^7.3.1
+    - name: esp32async/asynctcp
+      registry_url: https://components.espressif.com
+      require: private
+      version: ^3.3.8
+    source:
+      registry_url: https://components.espressif.com/
+      type: service
+    version: 3.7.6
   espressif/arduino-esp32:
     component_hash: 24d09ebaba2990281cb54ac3e0ba8fcdd8511c16b24114a4040476ece2949643
     dependencies:
@@ -462,9 +495,10 @@ dependencies:
       type: service
     version: 1.19.1
 direct_dependencies:
+- esp32async/espasyncwebserver
 - espressif/arduino-esp32
 - espressif/button
 - idf
-manifest_hash: d5aac21d9be1819c45092a8b0c14be99eee8c04e08d87ec7686ddf90d37f75cd
+manifest_hash: 18ab093db7b5b231775c11fae059ba7f7c44e74b0509e6cd47e2f87543ea2c28
 target: esp32s3
 version: 2.0.0

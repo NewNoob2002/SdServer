@@ -1,5 +1,8 @@
 #include "Arduino.h"
 #include "SdFat.h"
+#include "LittleFS.h"
+#include "WebServer.h"
+#include "WiFiManager.h"
 
 #define SD_FAT_TYPE 3
 
@@ -13,8 +16,8 @@ File32 file;
 SdExFat sd;
 ExFile file;
 #elif SD_FAT_TYPE == 3
-SdFs sd;
-FsFile file;
+SdFs *sd = nullptr;
+FsFile *file = nullptr;
 #else // SD_FAT_TYPE
 #error Invalid SD_FAT_TYPE
 #endif // SD_FAT_TYPE
@@ -75,27 +78,36 @@ void sdErrorHalt()
 void beginSD()
 {
     SPI.begin(SD_SCK_PIN, SD_MISO_PIN, SD_MOSI_PIN, SD_CS_PIN);
-    if (!sd.begin(SD_CONFIG))
+    if (sd == nullptr)
     {
-        sd.initErrorHalt(&Serial);
+        sd = new SdFs();
+    }
+    if (!sd->begin(SD_CONFIG))
+    {
+        sd->initErrorHalt(&Serial);
         return;
     }
 
     csd_t csd;
-    sd.card()->readCSD(&csd); // Card Specific Data
-    sdCardSize = (uint64_t)512 * sd.card()->sectorCount();
+    sd->card()->readCSD(&csd); // Card Specific Data
+    sdCardSize = (uint64_t)512 * sd->card()->sectorCount();
 
-    sd.volumeBegin();
+    sd->volumeBegin();
 
     // Find available cluster/space
-    sdFreeSpace = sd.vol()->freeClusterCount(); // This takes a few seconds to complete
-    sdFreeSpace *= sd.vol()->sectorsPerCluster();
+    sdFreeSpace = sd->vol()->freeClusterCount(); // This takes a few seconds to complete
+    sdFreeSpace *= sd->vol()->sectorsPerCluster();
     sdFreeSpace *= 512L; // Bytes per sector
 
     // uint64_t sdUsedSpace = sdCardSize - sdFreeSpace; //Don't think of it as used, think of it as unusable
     sdFreeSpace_MB = sdFreeSpace / 1024 / 1024;
     sdCardSize_MB = sdCardSize / 1024 / 1024;
     Serial.printf("SD card size: %ld MB / Free space: %ld MB\r\n", sdCardSize_MB, sdFreeSpace_MB);
+
+    if (sdCardSemaphore == nullptr)
+    {
+        sdCardSemaphore = xSemaphoreCreateMutex();
+    }
 }
 // #define sdError(msg) {
 // Serial.printf("error: %s", F(msg));
@@ -277,24 +289,118 @@ void beginSD()
 //      }
 //      return;
 //  }
-void sdTest(void *pvParameters)
+uint8_t buffer[1024 * 8];
+int bytesRead = 0;
+int bytesWritten = 0;
+void readSerial1(void *pvParameters)
 {
     while (1)
     {
-        file = sd.open("test.txt", O_CREAT | O_WRITE|O_APPEND);
-        file.println("Hello World");
-        file.sync();
-        file.close();
-        sd.ls("/", LS_A | LS_R | LS_DATE | LS_SIZE);
-        delay(1000);
+        bytesRead = Serial1.readBytes(buffer, sizeof(buffer));
+        delay(10);
     }
 }
+void sdTest(void *pvParameters)
+{
+
+    while (1)
+    {
+        if (bytesRead > 0)
+        {
+            long startTime = millis();
+            file->open(logFileName, O_CREAT | O_WRITE | O_APPEND);
+            bytesWritten = file->write(buffer, bytesRead);
+            if (bytesWritten > 0)
+            {
+                Serial.printf("writing to file: %d bytes written, %d bytes read\r\n", bytesWritten, bytesRead);
+            }
+            file->sync();
+            file->close();
+            long endTime = millis();
+            log_i("time taken: %d ms, write speed: %d bytes/s\r\n", endTime - startTime, bytesWritten * 1000 / (endTime - startTime));
+            delay(1);
+        }
+        delay(1);
+    }
+}
+
+bool beginLogging(const char *customFileName)
+{
+    if (customFileName == nullptr)
+    {
+        // Generate a standard log file name
+        // We are not reusing the last log, so erase the global/original filename
+        logFileName[0] = 0;
+
+        if (strlen(logFileName) == 0)
+        {
+            // u-blox platforms use ubx file extension for logs, all others use TXT
+            char fileExtension[4] = "xyz";
+
+            snprintf(logFileName, sizeof(logFileName), "/test.%s", // SdFat library
+                     fileExtension);
+        }
+    }
+    else
+    {
+        strncpy(logFileName, customFileName,
+                sizeof(logFileName) - 1); // customFileName already has the preceding slash added
+    }
+
+    // Allocate the log file
+    if (!file)
+    {
+        file = new FsFile;
+        if (!file)
+        {
+            Serial.printf("Failed to allocate logFile!");
+            return (false);
+        }
+    }
+
+    // Attempt to write to file system. This avoids collisions with file writing in gnssSerialReadTask()
+    if (xSemaphoreTake(sdCardSemaphore, 100) == pdPASS)
+    {
+        // markSemaphore(FUNCTION_CREATEFILE);
+
+        // O_CREAT - create the file if it does not exist
+        // O_APPEND - seek to the end of the file prior to each write
+        // O_WRITE - open for write
+        if (file->open(logFileName, O_CREAT | O_APPEND | O_WRITE) == false)
+        {
+            Serial.printf("Failed to create GNSS log file: %s\r\n", logFileName);
+            xSemaphoreGive(sdCardSemaphore);
+            return (false);
+        }
+    }
+    return true;
+}
+
+void beginFS()
+{
+    if (!LittleFS.begin(true, "/fs", 8, "littlefs"))
+    {
+        Serial.println("Failed to mount LittleFS");
+    }
+    Serial.printf("Total bytes: %d, Used bytes: %d\n", LittleFS.totalBytes(), LittleFS.usedBytes());
+}
+
 extern "C" void app_main()
 {
     initArduino();
+
     Serial.begin(115200);
+    Serial1.setRxBufferSize(2048);
+    Serial1.setRxFIFOFull(128);
+    Serial1.begin(115200, SERIAL_8N1, 18, 19);
+    beginFS();
+    initWiFiAP();
+    initWebServer();
     beginSD();
+    beginLogging(nullptr);
     // Do your own thing
-    sd.remove("test.txt");
-    xTaskCreate(sdTest, "sdTest", 2048, NULL, 5, NULL);
+    sd->ls("/", LS_A | LS_R | LS_DATE | LS_SIZE);
+    // sd.remove("test.txt");
+    xTaskCreate(sdTest, "sdTest", 3072, NULL, 5, NULL);
+    xTaskCreate(readSerial1, "readSerial1", 2048, NULL, 5, NULL);
 }

@@ -23,3 +23,6 @@ idf_component_register(
     SRCS  ${SRCS}
     INCLUDE_DIRS "include"
 )
+
+set(WEB_SRC_DIR "../web")
+littlefs_create_partition_image(littlefs ${WEB_SRC_DIR} FLASH_IN_PROJECT)

@@ -1,0 +1,29 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>ESP32 固件升级</title>
+    <link rel="stylesheet" href="style.css">
+</head>
+<body>
+    <h1>ESP32 固件升级</h1>
+    
+    <div class="upload-box">
+        <form id="uploadForm" method="POST" action="/update" enctype="multipart/form-data">
+            <div>
+                <input type="file" id="firmwareFile" name="firmware" accept=".bin" required>
+            </div>
+            <div>
+                <button type="submit" id="submit-btn">开始升级</button>
+            </div>
+        </form>
+    </div>
+
+    <div class="progress">
+        <div class="bar"></div>
+    </div>
+    <div class="status-text" id="status">等待文件上传...</div>
+    <script src="main.js"></script>
+</body>
+</html>
