@@ -40,8 +40,8 @@
 
 const char *_spp_server_name = "ESP32SPP";
 
-#define RX_QUEUE_SIZE         512
-#define TX_QUEUE_SIZE         32
+// #define RX_QUEUE_SIZE         512
+// #define TX_QUEUE_SIZE         32
 #define SPP_TX_QUEUE_TIMEOUT  1000
 #define SPP_TX_DONE_TIMEOUT   1000
 #define SPP_CONGESTED_TIMEOUT 1000
@@ -71,9 +71,11 @@ static esp_bd_addr_t _peer_bd_addr;
 static char _remote_name[ESP_BT_GAP_MAX_BDNAME_LEN + 1];
 static bool _isRemoteAddressSet;
 static bool _isMaster;
+#ifdef CONFIG_BT_SSP_ENABLED
 static bool _enableSSP;
 static bool _IO_CAP_INPUT;
 static bool _IO_CAP_OUTPUT;
+#endif
 esp_bt_pin_code_t _pin_code = {0};
 uint8_t _pin_code_len = 0;  // Number of valid Bytes in the esp_bt_pin_code_t array
 static esp_spp_sec_t _sec_mask;
@@ -345,7 +347,7 @@ static void esp_spp_cb(esp_spp_cb_event_t event, esp_spp_cb_param_t *param) {
       } else if (_spp_rx_queue != NULL) {
         for (int i = 0; i < param->data_ind.len; i++) {
           if (xQueueSend(_spp_rx_queue, param->data_ind.data + i, (TickType_t)0) != pdTRUE) {
-            log_e("RX Full! Discarding %u bytes", param->data_ind.len - i);
+            Serial.printf("RX Full! Discarding %u bytes\r\n", param->data_ind.len - i);
             break;
           }
         }
@@ -536,6 +538,7 @@ static void esp_bt_gap_cb(esp_bt_gap_cb_event_t event, esp_bt_gap_cb_param_t *pa
         esp_bt_gap_pin_reply(param->pin_req.bda, true, _pin_code_len, _pin_code);
       }
       break;
+#ifdef CONFIG_BT_SSP_ENABLED
     case ESP_BT_GAP_CFM_REQ_EVT:  // Enum 6 - Security Simple Pairing User Confirmation request.
       log_i("ESP_BT_GAP_CFM_REQ_EVT Please compare the numeric value: %d", param->cfm_req.num_val);
       if (confirm_request_callback) {
@@ -546,10 +549,13 @@ static void esp_bt_gap_cb(esp_bt_gap_cb_event_t event, esp_bt_gap_cb_param_t *pa
         esp_bt_gap_ssp_confirm_reply(param->cfm_req.bda, false);
       }
       break;
+#endif
 
     case ESP_BT_GAP_KEY_NOTIF_EVT:  // Enum 7 - Security Simple Pairing Passkey Notification
       log_i("ESP_BT_GAP_KEY_NOTIF_EVT passkey:%d", param->key_notif.passkey);
       break;
+
+#ifdef CONFIG_BT_SSP_ENABLED
     case ESP_BT_GAP_KEY_REQ_EVT:  // Enum 8 - Security Simple Pairing Passkey request
       log_i("ESP_BT_GAP_KEY_REQ_EVT Please enter passkey!");
       if (key_request_callback) {
@@ -560,6 +566,7 @@ static void esp_bt_gap_cb(esp_bt_gap_cb_event_t event, esp_bt_gap_cb_param_t *pa
         esp_bt_gap_ssp_confirm_reply(param->cfm_req.bda, false);
       }
       break;
+#endif
 
     case ESP_BT_GAP_READ_RSSI_DELTA_EVT:  // Enum 9 - Read rssi event
       log_i("ESP_BT_GAP_READ_RSSI_DELTA_EVT Read rssi event");
@@ -609,7 +616,7 @@ static void esp_bt_gap_cb(esp_bt_gap_cb_event_t event, esp_bt_gap_cb_param_t *pa
   }
 }
 
-static bool _init_bt(const char *deviceName, bt_mode mode) {
+static bool _init_bt(const char *deviceName, bt_mode mode, uint16_t rxQueueSize, uint16_t txQueueSize) {
   if (!_bt_event_group) {
     _bt_event_group = xEventGroupCreate();
     if (!_bt_event_group) {
@@ -630,14 +637,16 @@ static bool _init_bt(const char *deviceName, bt_mode mode) {
     xEventGroupSetBits(_spp_event_group, SPP_CLOSED);
   }
   if (_spp_rx_queue == NULL) {
-    _spp_rx_queue = xQueueCreate(RX_QUEUE_SIZE, sizeof(uint8_t));  //initialize the queue
+    //_spp_rx_queue = xQueueCreate(RX_QUEUE_SIZE, sizeof(uint8_t));  //initialize the queue
+    _spp_rx_queue = xQueueCreate(rxQueueSize, sizeof(uint8_t)); //initialize the queue
     if (_spp_rx_queue == NULL) {
       log_e("RX Queue Create Failed");
       return false;
     }
   }
   if (_spp_tx_queue == NULL) {
-    _spp_tx_queue = xQueueCreate(TX_QUEUE_SIZE, sizeof(spp_packet_t *));  //initialize the queue
+    //_spp_tx_queue = xQueueCreate(TX_QUEUE_SIZE, sizeof(spp_packet_t *));  //initialize the queue
+    _spp_tx_queue = xQueueCreate(txQueueSize, sizeof(spp_packet_t*)); //initialize the queue
     if (_spp_tx_queue == NULL) {
       log_e("TX Queue Create Failed");
       return false;
@@ -700,6 +709,7 @@ static bool _init_bt(const char *deviceName, bt_mode mode) {
   log_i("device name set");
   esp_bt_gap_set_device_name(deviceName);
 
+#ifdef CONFIG_BT_SSP_ENABLED
   if (_enableSSP) {
     log_i("Simple Secure Pairing");
     esp_bt_sp_param_t param_type = ESP_BT_SP_IOCAP_MODE;
@@ -715,12 +725,13 @@ static bool _init_bt(const char *deviceName, bt_mode mode) {
     }
     esp_bt_gap_set_security_param(param_type, &iocap, sizeof(uint8_t));
   }
+#endif
 
   // the default BTA_DM_COD_LOUDSPEAKER does not work with the macOS BT stack
   esp_bt_cod_t cod;
-  cod.major = 0b00001;
-  cod.minor = 0b000100;
-  cod.service = 0b00000010110;
+  cod.major = ESP_BT_COD_MAJOR_DEV_PERIPHERAL;
+  cod.minor = ESP_BT_COD_MINOR_PERIPHERAL_SENSING_DEVICE;
+  cod.service = ESP_BT_COD_SRVC_OBJ_TRANSFER;
   if (esp_bt_gap_set_cod(cod, ESP_BT_INIT_COD) != ESP_OK) {
     log_e("set cod failed");
     return false;
@@ -778,10 +789,12 @@ static bool waitForConnect(int timeout) {
   if ((rc & SPP_CONNECTED) != 0) {
     return true;
   } else if ((rc & SPP_CLOSED) != 0) {
-    log_d("connection closed!");
+    if (timeout > 0)
+      log_d("connection closed!");
     return false;
   }
-  log_d("timeout");
+  if (timeout > 0)
+    log_d("timeout");
   return false;
 }
 
@@ -811,12 +824,13 @@ BluetoothSerial::~BluetoothSerial(void) {
  * @param isMaster set to true if you want to connect to an other device
  * @param disableBLE if BLE is not used, its ram can be freed to get +10kB free ram
  */
-bool BluetoothSerial::begin(String localName, bool isMaster, bool disableBLE) {
+//bool BluetoothSerial::begin(String localName, bool isMaster, bool disableBLE) {
+bool BluetoothSerial::begin(String localName, bool isMaster, bool disableBLE, uint16_t rxQueueSize, uint16_t txQueueSize) {
   _isMaster = isMaster;
   if (localName.length()) {
     local_name = localName;
   }
-  return _init_bt(local_name.c_str(), disableBLE ? BT_MODE_CLASSIC_BT : BT_MODE_BTDM);
+  return _init_bt(local_name.c_str(), disableBLE ? BT_MODE_CLASSIC_BT : BT_MODE_BTDM, rxQueueSize, txQueueSize);
 }
 
 int BluetoothSerial::available(void) {
@@ -869,7 +883,7 @@ size_t BluetoothSerial::write(const uint8_t *buffer, size_t size) {
 void BluetoothSerial::flush() {
   if (_spp_tx_queue != NULL) {
     while (uxQueueMessagesWaiting(_spp_tx_queue) > 0) {
-      delay(2);
+      delay(2); // https://github.com/espressif/arduino-esp32/pull/9905
     }
   }
 }
@@ -885,6 +899,7 @@ void BluetoothSerial::memrelease() {
   esp_bt_mem_release(ESP_BT_MODE_BTDM);
 }
 
+#ifdef CONFIG_BT_SSP_ENABLED
 void BluetoothSerial::onConfirmRequest(ConfirmRequestCb cb) {
   confirm_request_callback = cb;
 }
@@ -896,6 +911,7 @@ void BluetoothSerial::onKeyRequest(KeyRequestCb cb) {
 void BluetoothSerial::respondPasskey(uint32_t passkey) {
   esp_bt_gap_ssp_passkey_reply(current_bd_addr, true, passkey);
 }
+#endif
 
 void BluetoothSerial::onAuthComplete(AuthCompleteCb cb) {
   auth_complete_callback = cb;
@@ -910,6 +926,7 @@ esp_err_t BluetoothSerial::register_callback(esp_spp_cb_t callback) {
   return ESP_OK;
 }
 
+#ifdef CONFIG_BT_SSP_ENABLED
 // Enable Simple Secure Pairing (using generated PIN)
 // This must be called before calling begin, otherwise has no effect!
 void BluetoothSerial::enableSSP() {
@@ -945,6 +962,8 @@ void BluetoothSerial::disableSSP() {
   _enableSSP = false;
 }
 
+#else
+
 bool BluetoothSerial::setPin(const char *pin, uint8_t pin_code_len) {
   if (pin_code_len == 0 || pin_code_len > 16) {
     log_e("PIN code must be 1-16 Bytes long! Called with length %d", pin_code_len);
@@ -954,6 +973,7 @@ bool BluetoothSerial::setPin(const char *pin, uint8_t pin_code_len) {
   memcpy(_pin_code, pin, pin_code_len);
   return (esp_bt_gap_set_pin(ESP_BT_PIN_TYPE_FIXED, _pin_code_len, _pin_code) == ESP_OK);
 }
+#endif
 
 bool BluetoothSerial::connect(String remoteName) {
   bool retval = false;

@@ -17,3 +17,4 @@ dependencies:
   espressif/arduino-esp32: ^3.2.0
   espressif/button: ^4.1.1
   esp32async/espasyncwebserver: ^3.7.4
+  espressif/button: ^4.1.2

@@ -1,0 +1,15 @@
+# 组件名/Kconfig.projbuild
+
+menu "GNSS Component Configuration"
+    config ENABLE_FEATURE_980
+        bool "Enable Feature UM980"
+        default y
+        help
+            Include feature_a.c in the build.
+
+    config ENABLE_FEATURE_B
+        bool "Enable Feature B"
+        default n
+        help
+            Include feature_b.c in the build.
+endmenu

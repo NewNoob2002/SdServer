@@ -1,8 +1,16 @@
 #include "Arduino.h"
 #include "SdFat.h"
 #include "LittleFS.h"
+
+#include "state.h"
+#include "global.h"
 #include "WebServer.h"
 #include "WiFiManager.h"
+#include "Bluetooth.h"
+#include "settings.h"
+
+settings_t settings;
+task_t task;
 
 #define SD_FAT_TYPE 3
 
@@ -46,7 +54,8 @@ uint32_t sdCardSize_MB = 0;
 uint32_t sdFreeSpace_MB = 0;
 bool outOfSDSpace = false;
 unsigned long lastLogSyncTime = 0;
-
+volatile SystemState systemState = STATE_NOT_SET;
+volatile SystemState requestedSystemState = STATE_NOT_SET;
 uint8_t sectorBuffer[512];
 //------------------------------------------------------------------------------
 // SdCardFactory constructs and initializes the appropriate card.
@@ -56,6 +65,11 @@ SdCardFactory cardFactory;
 SdCard *m_card = nullptr;
 uint32_t const ERASE_SIZE = 262144L;
 
+uint32_t lastSystemStateUpdate;
+bool forceSystemStateUpdate; // Set true to avoid update wait
+bool newSystemStateRequested = false;
+
+online_struct online;
 void sdErrorHalt()
 {
     if (!m_card)
@@ -109,186 +123,6 @@ void beginSD()
         sdCardSemaphore = xSemaphoreCreateMutex();
     }
 }
-// #define sdError(msg) {
-// Serial.printf("error: %s", F(msg));
-// sdErrorHalt();
-// }
-
-// void beginSD()
-// {
-//     if (present.microSd == false)
-//         return;
-
-//     bool gotSemaphore;
-
-//     gotSemaphore = false;
-
-//     while (settings.enableSD == true)
-//     {
-//         // Setup SD card access semaphore
-//         if (sdCardSemaphore == nullptr)
-//             sdCardSemaphore = xSemaphoreCreateMutex();
-
-//         // If an SD card is present, allow SdFat to take over
-//         // ESP_LOGI("beginSD", "SD card detected");
-
-//         // Allocate the data structure that manages the microSD card
-//         if (sd == nullptr)
-//         {
-//             sd = new SdFat();
-//             if (sd == nullptr)
-//             {
-//                 ESP_LOGE("beginSD", "Failed to allocate the SdFat structure!");
-//                 break;
-//             }
-//         }
-
-//         if (settings.spiFrequency > 16)
-//         {
-//             systemPrintln("Error: SPI Frequency out of range. Default to 16MHz");
-//             settings.spiFrequency = 16;
-//         }
-
-//         if (sd->begin(SdSpiConfig(-1, DEDICATED_SPI, SD_SCK_MHZ(settings.spiFrequency))) == false)
-//         {
-//             int tries = 0;
-//             int maxTries = 2;
-//             for (; tries < maxTries; tries++)
-//             {
-//                 ESP_LOGE("beginSD", "SD init failed - using SPI and SdFat. Trying again %d out of %d", tries + 1, maxTries);
-
-//                 delay(250); // Give SD more time to power up, then try again
-//                 if (sd->begin(SdSpiConfig(-1, DEDICATED_SPI, SD_SCK_MHZ(settings.spiFrequency))) == true)
-//                     break;
-//             }
-
-//             if (tries == maxTries)
-//             {
-//                 ESP_LOGE("beginSD", "SD init failed - using SPI and SdFat. Is card formatted?");
-//                 // Check reset count and prevent rolling reboot
-//                 // if (settings.resetCount < 5)
-//                 // {
-//                 //     if (settings.forceResetOnSDFail == true)
-//                 //         ESP.restart();
-//                 // }
-//                 break;
-//             }
-//         }
-
-//         // Change to root directory. All new file creation will be in root.
-//         if (sd->chdir() == false)
-//         {
-//             ESP_LOGE("beginSD", "SD change directory failed");
-//             break;
-//         }
-
-//         if (createTestFile() == false)
-//         {
-//             ESP_LOGE("beginSD", "Failed to create test file. Format SD card with 'SD Card Formatter'.");
-//             // displaySDFail(5000);
-//             break;
-//         }
-
-//         csd_t csd;
-//         sd->card()->readCSD(&csd); // Card Specific Data
-//         sdCardSize = (uint64_t)512 * sd->card()->sectorCount();
-
-//         sd->volumeBegin();
-
-//         // Find available cluster/space
-//         sdFreeSpace = sd->vol()->freeClusterCount(); // This takes a few seconds to complete
-//         sdFreeSpace *= sd->vol()->sectorsPerCluster();
-//         sdFreeSpace *= 512L; // Bytes per sector
-
-//         // uint64_t sdUsedSpace = sdCardSize - sdFreeSpace; //Don't think of it as used, think of it as unusable
-//         sdFreeSpace_MB = sdFreeSpace / 1024 / 1024;
-//         sdCardSize_MB = sdCardSize / 1024 / 1024;
-//         systemPrintf("SD card size: %d MB / Free space: %d MB\r\n", sdCardSize_MB, sdFreeSpace_MB);
-
-//         if (sdFreeSpace_MB < 100)
-//             outOfSDSpace = true;
-//         else
-//             outOfSDSpace = false;
-
-//         systemPrintln("microSD: Online");
-//         online.microSD = true;
-//         break;
-//     }
-// }
-
-// void formatSD()
-//  {
-//      uint32_t firstBlock = 0;
-//      uint32_t lastBlock;
-//      uint16_t n = 0;
-//      // Select and initialize proper card driver.
-//      m_card = cardFactory.newCard(SdSpiConfig(-1, DEDICATED_SPI, SD_SCK_MHZ(settings.spiFrequency)));
-//      if (!m_card || m_card->errorCode())
-//      {
-//          sdError("card init failed.");
-//          releaseSdLock();
-//          return;
-//      }
-
-//      cardSectorCount = m_card->sectorCount();
-//      if (!cardSectorCount)
-//      {
-//          sdError("Get sector count failed.");
-//          releaseSdLock();
-//          return;
-//      }
-//      auto cardSize = cardSectorCount * 512e-9;
-//      systemPrintf("Card size: %f GB (GB = 1E9 bytes)\n", cardSize);
-//      systemPrintf("Card will be formated ");
-//      if (cardSectorCount > 67108864)
-//      {
-//          systemPrintf("exFAT\n");
-//      }
-//      else if (cardSectorCount > 4194304)
-//      {
-//          systemPrintf("FAT32\n");
-//      }
-//      else
-//      {
-//          systemPrintf("FAT16\n");
-//      }
-//      do
-//      {
-//          lastBlock = firstBlock + ERASE_SIZE - 1;
-//          if (lastBlock >= cardSectorCount)
-//          {
-//              lastBlock = cardSectorCount - 1;
-//          }
-//          if (!m_card->erase(firstBlock, lastBlock))
-//          {
-//              sdError("erase failed");
-//          }
-//          systemPrintf(".");
-//          if ((n++) % 64 == 63)
-//          {
-//              systemPrintf("\n");
-//          }
-//          firstBlock += ERASE_SIZE;
-//      } while (firstBlock < cardSectorCount);
-
-//      if (!m_card->readSector(0, sectorBuffer))
-//      {
-//          sdError("readBlock");
-//      }
-//      systemPrintf("All data set to %d\n", int(sectorBuffer[0]));
-//      systemPrintf("Erase done\n");
-//      ExFatFormatter exFatFormatter;
-//      FatFormatter fatFormatter;
-//      bool rtn = cardSectorCount > 67108864
-//                     ? exFatFormatter.format(m_card, sectorBuffer, &Serial)
-//                     : fatFormatter.format(m_card, sectorBuffer, &Serial);
-
-//      if (!rtn)
-//      {
-//          sdErrorHalt();
-//      }
-//      return;
-//  }
 uint8_t buffer[1024 * 8];
 int bytesRead = 0;
 int bytesWritten = 0;
@@ -296,8 +130,17 @@ void readSerial1(void *pvParameters)
 {
     while (1)
     {
-        bytesRead = Serial1.readBytes(buffer, sizeof(buffer));
-        delay(10);
+        if (bluetoothGetState() == BT_CONNECTED)
+        {
+            bluetoothWrite((uint8_t *)"hello", sizeof("hello"));
+            while (bluetoothRxDataAvailable())
+            {
+                bytesRead = bluetoothRead(buffer, sizeof(buffer));
+                Serial.write(buffer, bytesRead);
+                delay(10);
+            }
+        }
+        delay(1);
     }
 }
 void sdTest(void *pvParameters)
@@ -378,6 +221,15 @@ bool beginLogging(const char *customFileName)
 
 void beginFS()
 {
+    // Initialize NVS
+    esp_err_t ret = nvs_flash_init();
+    if (ret == ESP_ERR_NVS_NO_FREE_PAGES || ret == ESP_ERR_NVS_NEW_VERSION_FOUND)
+    {
+        ESP_ERROR_CHECK(nvs_flash_erase());
+        ret = nvs_flash_init();
+    }
+    ESP_ERROR_CHECK(ret);
+
     if (!LittleFS.begin(true, "/fs", 8, "littlefs"))
     {
         Serial.println("Failed to mount LittleFS");
@@ -390,17 +242,21 @@ extern "C" void app_main()
     initArduino();
 
     Serial.begin(115200);
-    Serial1.setRxBufferSize(2048);
-    Serial1.setRxFIFOFull(128);
-    Serial1.begin(115200, SERIAL_8N1, 18, 19);
     beginFS();
-    initWiFiAP();
-    initWebServer();
-    beginSD();
-    beginLogging(nullptr);
-    // Do your own thing
-    sd->ls("/", LS_A | LS_R | LS_DATE | LS_SIZE);
+    beginButton();
+    // initWiFiAP();
+    // initWebServer();
+    // beginSD();
+    beginSystemState();
     // sd.remove("test.txt");
-    xTaskCreate(sdTest, "sdTest", 3072, NULL, 5, NULL);
+    // xTaskCreate(sdTest, "sdTest", 3072, NULL, 5, NULL);
     xTaskCreate(readSerial1, "readSerial1", 2048, NULL, 5, NULL);
+    xTaskCreate(stateUpdate, "stateUpdate", 4096, nullptr, 6, nullptr);
+
+    while(1)
+    {
+        webServerUpdate();
+        reportHeap();
+        delay(10);
+    }
 }
