@@ -2,7 +2,6 @@
 #include "Arduino.h"
 // #include "LittleFS.h"
 
-
 #include "WiFiManager.h"
 
 AsyncWebServer *webServer = nullptr;
@@ -186,9 +185,7 @@ void updateWebServerTask(void *e)
         //     systemPrintln("updateWebServerTask running");
         // }
 
-
         dnsServer.processNextRequest();
-        
 
         delay(10);
         taskYIELD();
@@ -310,6 +307,10 @@ void webServerUpdate()
         {
             online.webServer = true;
             webServerSetState(WEBSERVER_STATE_RUNNING);
+        }
+        else
+        {
+            ESP_LOGE("webServer", "not assign success");
         }
     }
     break;
@@ -665,8 +666,8 @@ bool webServerAssignResources(int httpPort)
         // }
         // createSettingsString(settingsCSV);
 
-    //
-    // https: // github.com/espressif/arduino-esp32/blob/master/libraries/DNSServer/examples/CaptivePortal/CaptivePortal.ino
+        //
+        // https: // github.com/espressif/arduino-esp32/blob/master/libraries/DNSServer/examples/CaptivePortal/CaptivePortal.ino
         if (settings.enableCaptivePortal == true)
         {
             dnsServer.start();
@@ -712,7 +713,9 @@ bool webServerAssignResources(int httpPort)
                       {
 // 检查index_html是否已定义
 #ifdef index_html_found
-                          request->send(200, "text/html", (const uint8_t *)index_html, sizeof(index_html));
+                          AsyncWebServerResponse *response = request->beginResponse(200, "text/html", (const uint8_t *)index_html, sizeof(index_html));
+                          response->addHeader("Content-Encoding", "gzip");
+                          request->send(response);
 #else
                           request->send(200, "text/html", "Welcome to ESP32 Web Server");
 #endif
@@ -765,8 +768,10 @@ bool webServerAssignResources(int httpPort)
 
         webServer->on("/src/main.js", HTTP_GET, [](AsyncWebServerRequest *request)
                       {
-#ifdef main_js
-                          request->send(200, "text/javascript", (const uint8_t *)main_js, sizeof(main_js));
+#ifdef main_js_found
+                          AsyncWebServerResponse *response = request->beginResponse(200, "text/javascript", (const uint8_t *)main_js, sizeof(main_js));
+                          response->addHeader("Content-Encoding", "gzip");
+                          request->send(response);
 #else
                           request->send(404);
 #endif
@@ -820,9 +825,11 @@ bool webServerAssignResources(int httpPort)
                       { request->send(200, "image/png", (const uint8_t *)battery3_Charging_png, sizeof(battery3_Charging_png)); });
 #endif
 
-#ifdef style_css
+#ifdef style_css_found
         webServer->on("/src/style.css", HTTP_GET, [](AsyncWebServerRequest *request)
-                      { request->send(200, "text/css", (const uint8_t *)style_css, sizeof(style_css)); });
+                      {   AsyncWebServerResponse *response = request->beginResponse(200, "text/css", (const uint8_t *)style_css, sizeof(style_css));
+                          response->addHeader("Content-Encoding", "gzip");
+                          request->send(response); });
 #endif
 
 #ifdef icomoon_eot
@@ -858,14 +865,12 @@ bool webServerAssignResources(int httpPort)
             handleUpload); // Run handleUpload function when file manager file is uploaded
 #endif
 
-#ifdef handleFirmwareFileUpload
         // Handler for the /uploadFirmware form POST
         webServer->on(
-            "/uploadFirmware", HTTP_POST,
+            "/update", HTTP_POST,
             [](AsyncWebServerRequest *request)
             { request->send(200, "text/plain", ""); },
             handleFirmwareFileUpload);
-#endif
 
 #ifdef getFileList
         // Handler for file manager
@@ -947,7 +952,7 @@ bool webServerAssignResources(int httpPort)
 
         return true;
     } while (0);
-
+    ESP_LOGE("webServer", "failed");
     // Release the resources
     webServerStopSockets();
     webServerReleaseResources();

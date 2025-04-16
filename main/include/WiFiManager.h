@@ -11,6 +11,8 @@
 
 static int wifiFailedConnectionAttempts = 0;
 
+void initWiFiAP(void);
+
 #define WIFI_STOP()                                                                                                    \
     {                                                                                                                  \
         if (settings.debugWifiState)                                                                                   \

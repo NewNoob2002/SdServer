@@ -23,54 +23,62 @@ static bool wifiStationRunning;
 // static esp_netif_t *ap_netif = NULL;
 // static char ip_address[16] = "192.168.4.1"; // Default AP IP
 
-// void initWiFiAP(void)
-// {
-//     // Initialize TCP/IP network interface
-//     ESP_ERROR_CHECK(esp_netif_init());
-//     ESP_ERROR_CHECK(esp_event_loop_create_default());
+void initWiFiAP(void)
+{
+    const esp_netif_ip_info_t netif_soft_ap_ip = {
+        .ip = {.addr = ESP_IP4TOADDR(192, 168, 10, 12)},
+        .netmask = {.addr = ESP_IP4TOADDR(255, 255, 255, 0)},
+        .gw = {.addr = ESP_IP4TOADDR(192, 168, 10, 12)}
 
-//     // Create default AP netif
-//     ap_netif = esp_netif_create_default_wifi_ap();
+    };
+    const esp_netif_inherent_config_t netif_base_cfg =
+        {
+            .flags = (esp_netif_flags_t)(ESP_NETIF_IPV4_ONLY_FLAGS(ESP_NETIF_DHCP_SERVER) | ESP_NETIF_FLAG_AUTOUP),
+            ESP_COMPILER_DESIGNATED_INIT_AGGREGATE_TYPE_EMPTY(mac)
+                .ip_info = &netif_soft_ap_ip,
+            .get_ip_event = 0,
+            .lost_ip_event = 0,
+            .if_key = "WIFI_AP_DEF",
+            .if_desc = "ap",
+            .route_prio = 10,
+            .bridge_info = NULL
 
-//     // Initialize WiFi
-//     wifi_init_config_t cfg = WIFI_INIT_CONFIG_DEFAULT();
-//     ESP_ERROR_CHECK(esp_wifi_init(&cfg));
+        };
+    const esp_netif_config_t wifi_netif_ap = {
+        .base = &netif_base_cfg,
+        .driver = NULL,
+        .stack = ESP_NETIF_NETSTACK_DEFAULT_WIFI_AP,
+    };
 
-//     // Configure WiFi in AP mode
-//     wifi_config_t wifi_config = {
-//         .ap = {
-//             .ssid = WIFI_AP_SSID,
-//             .password = WIFI_AP_PASSWORD,
-//             .ssid_len = strlen(WIFI_AP_SSID),
-//             .channel = WIFI_AP_CHANNEL,
-//             .authmode = WIFI_AUTH_WPA_WPA2_PSK,
-//             .max_connection = WIFI_AP_MAX_CONN,
+    esp_netif_t *netif = esp_netif_new(&wifi_netif_ap);
+    assert(netif);
+    ESP_ERROR_CHECK(esp_netif_attach_wifi_ap(netif));
+    ESP_ERROR_CHECK(esp_wifi_set_default_wifi_ap_handlers());
 
-//         }};
+    wifi_config_t wifi_config = {
+        .ap = {
+            .ssid = "ESP32",
+            .password = "12345678",
+            .ssid_len = strlen("ESP32"),
+            .authmode = WIFI_AUTH_WPA2_PSK,
+            .max_connection = 2,
 
-//     // If no password is set, use open auth mode
-//     if (strlen(WIFI_AP_PASSWORD) == 0)
-//     {
-//         wifi_config.ap.authmode = WIFI_AUTH_OPEN;
-//     }
+        },
+    };
 
-//     // Set WiFi mode and config
-//     ESP_ERROR_CHECK(esp_wifi_set_mode(WIFI_MODE_AP));
-//     ESP_ERROR_CHECK(esp_wifi_set_config(WIFI_IF_AP, &wifi_config));
+    wifi_init_config_t wifi_cfg = WIFI_INIT_CONFIG_DEFAULT();
+    ESP_ERROR_CHECK(esp_wifi_init(&wifi_cfg));
 
-//     // Start WiFi
-//     ESP_ERROR_CHECK(esp_wifi_start());
+    ESP_ERROR_CHECK(esp_wifi_set_mode(WIFI_MODE_AP));
 
-//     // Get the IP info of the AP netif
-//     esp_netif_ip_info_t ip_info;
-//     ESP_ERROR_CHECK(esp_netif_get_ip_info(ap_netif, &ip_info));
+    ESP_ERROR_CHECK(esp_wifi_set_config(WIFI_IF_AP, &wifi_config));
 
-//     // Convert IP to string
-//     snprintf(ip_address, sizeof(ip_address), IPSTR, IP2STR(&ip_info.ip));
-
-//     // ESP_LOGI(TAG, "WiFi AP started with SSID: %s", WIFI_AP_SSID);
-//     // ESP_LOGI(TAG, "IP address: %s", ip_address);
-// }
+    esp_err_t ret = esp_wifi_start();
+    if (ret == ESP_OK)
+    {
+        ESP_LOGI("wifi_start", "wifi name: %s, wifi password: %s", "ESP32", "12345678");
+    }
+}
 
 // const char *getIPAddress(void)
 // {
@@ -129,6 +137,7 @@ bool wifiStart()
     // }
 
     // Start WiFi
+
     wifiConnect(startWiFiStation, startWiFiAp, settings.wifiConnectTimeoutMs);
 
     // If we are in AP only mode, as long as the AP is started, return true
@@ -272,8 +281,8 @@ bool wifiConnect(bool startWiFiStation, bool startWiFiAP, unsigned long timeout)
     // Start AP with fixed IP
     if (wifiMode == WIFI_AP || wifiMode == WIFI_AP_STA)
     {
-        IPAddress local_IP(192, 168, 10, 12);
-        IPAddress gateway(192, 168, 10, 1);
+        IPAddress local_IP(192, 168, 4, 1);
+        IPAddress gateway(192, 168, 4, 1);
         IPAddress subnet(255, 255, 255, 0);
 
         WiFi.softAPConfig(local_IP, gateway, subnet);
@@ -290,15 +299,15 @@ bool wifiConnect(bool startWiFiStation, bool startWiFiAP, unsigned long timeout)
         // settings.webconfigApName
         else
             strncpy(softApSsid, "RTK_Caster", sizeof(softApSsid));
-        // snprintf("%s", sizeof(softApSsid), softApSsid, (const char)"RTK Caster");
-
-        if (WiFi.softAP(softApSsid) == false)
+        // snprintf("%s", sizeof(softApSsid), softApSsid, (const char*)"RTK Caster");
+        if (WiFi.softAP("ESP32Server") == false)
         {
             systemPrintln("WiFi AP failed to start");
             return (false);
         }
-        systemPrintf("WiFi AP %s started with IP: ", softApSsid);
-        // systemPrintln(WiFi.softAPIP());
+        WiFi.begin();
+        systemPrintf("WiFi AP %s started with IP: ", "ESP32Server");
+        systemPrintln(WiFi.softAPIP());
 
         // Start DNS Server
         if (dnsServer.start(53, "*", WiFi.softAPIP()) == false)

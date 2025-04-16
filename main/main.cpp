@@ -237,6 +237,10 @@ void beginFS()
     Serial.printf("Total bytes: %d, Used bytes: %d\n", LittleFS.totalBytes(), LittleFS.usedBytes());
 }
 
+IPAddress local_ip(192, 168, 4, 1); // 设置静态 IP 地址
+IPAddress gateway(192, 168, 4, 1);  // 设置网关地址
+IPAddress subnet(255, 255, 255, 0);  // 设置子网掩码
+
 extern "C" void app_main()
 {
     initArduino();
@@ -252,8 +256,8 @@ extern "C" void app_main()
     // xTaskCreate(sdTest, "sdTest", 3072, NULL, 5, NULL);
     xTaskCreate(readSerial1, "readSerial1", 2048, NULL, 5, NULL);
     xTaskCreate(stateUpdate, "stateUpdate", 4096, nullptr, 6, nullptr);
-
-    while(1)
+    // initWiFiAP();
+    while (1)
     {
         webServerUpdate();
         reportHeap();

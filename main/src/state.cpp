@@ -145,7 +145,7 @@ void stateUpdate(void *e)
             {
             case (STATE_ROVER_NOT_STARTED):
             {
-                bluetoothStart();
+                // bluetoothStart();
                 break;
             }
 
